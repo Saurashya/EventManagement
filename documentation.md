@@ -4,7 +4,7 @@
 
 **Version 1.0**  
 **Date: May 2026**  
-**Authors: Saurashya Rayamajhi**
+**Authors: Abhisekh Bista**
 
 ---
 
