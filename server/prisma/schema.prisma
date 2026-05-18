@@ -1,0 +1,369 @@
+generator client {
+  provider = "prisma-client-js"
+  engineType = "library"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── ENUMS ──────────────────────────────────────────────
+
+enum UserRole {
+  ADMIN
+  ORGANIZER
+  ATTENDEE
+}
+
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  CANCELLED
+  COMPLETED
+}
+
+enum EventVisibility {
+  PUBLIC
+  PRIVATE
+}
+
+enum TicketType {
+  FREE
+  PAID
+}
+
+enum RegistrationStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum PaymentProvider {
+  STRIPE
+  KHALTI
+  ESEWA
+  FREE
+}
+
+enum CheckInMethod {
+  QR_SCAN
+  MANUAL
+}
+
+enum NotificationType {
+  EVENT_UPDATE
+  REGISTRATION
+  PAYMENT
+  CHECKIN
+  ANNOUNCEMENT
+  POLL
+}
+
+// ─── MODELS ─────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  password      String?
+  name          String
+  avatar        String?
+  phone         String?
+  company       String?
+  role          UserRole  @default(ATTENDEE)
+  
+  // OAuth
+  googleId      String?   @unique
+  provider      String?   @default("local")
+  
+  isVerified    Boolean   @default(false)
+  isActive      Boolean   @default(true)
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // Relations
+  organizedEvents  Event[]        @relation("OrganizerEvents")
+  registrations    Registration[]
+  payments         Payment[]
+  checkIns         CheckIn[]
+  notifications    Notification[]
+  pollVotes        PollVote[]
+
+  @@map("users")
+}
+
+model Event {
+  id            String          @id @default(uuid())
+  title         String
+  slug          String          @unique
+  description   String?
+  shortDesc     String?
+  bannerUrl     String?
+  
+  // Dates
+  startDate     DateTime
+  endDate       DateTime
+  timezone      String          @default("Asia/Kathmandu")
+  
+  // Location
+  venue         String?
+  address       String?
+  city          String?
+  country       String?
+  isOnline      Boolean         @default(false)
+  meetingUrl    String?
+  
+  // Settings
+  status        EventStatus     @default(DRAFT)
+  visibility    EventVisibility @default(PUBLIC)
+  capacity      Int?
+  category      String?
+  tags          String[]
+  
+  // Organizer
+  organizerId   String
+  organizer     User            @relation("OrganizerEvents", fields: [organizerId], references: [id])
+  
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  
+  // Relations
+  ticketTiers   TicketTier[]
+  registrations Registration[]
+  sessions      Session[]
+  promoCodes    PromoCode[]
+  polls         Poll[]
+  announcements Announcement[]
+
+  @@index([organizerId])
+  @@index([status])
+  @@index([startDate])
+  @@map("events")
+}
+
+model TicketTier {
+  id            String      @id @default(uuid())
+  name          String
+  description   String?
+  price         Decimal     @default(0) @db.Decimal(10, 2)
+  currency      String      @default("NPR")
+  quantity      Int
+  sold          Int         @default(0)
+  type          TicketType  @default(FREE)
+  
+  // Dynamic pricing
+  earlyBirdPrice    Decimal?    @db.Decimal(10, 2)
+  earlyBirdEndDate  DateTime?
+  
+  isActive      Boolean     @default(true)
+  sortOrder     Int         @default(0)
+  
+  eventId       String
+  event         Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  
+  registrations Registration[]
+  
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([eventId])
+  @@map("ticket_tiers")
+}
+
+model Registration {
+  id            String              @id @default(uuid())
+  qrCode        String              @unique
+  status        RegistrationStatus  @default(PENDING)
+  amount        Decimal             @default(0) @db.Decimal(10, 2)
+  
+  // Attendee info
+  attendeeName  String?
+  attendeeEmail String?
+  attendeePhone String?
+  
+  userId        String
+  user          User                @relation(fields: [userId], references: [id])
+  
+  eventId       String
+  event         Event               @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  
+  ticketTierId  String
+  ticketTier    TicketTier          @relation(fields: [ticketTierId], references: [id])
+  
+  promoCodeId   String?
+  promoCode     PromoCode?          @relation(fields: [promoCodeId], references: [id])
+  
+  payment       Payment?
+  checkIn       CheckIn?
+  
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@unique([userId, eventId])
+  @@index([eventId])
+  @@index([userId])
+  @@map("registrations")
+}
+
+model Payment {
+  id              String          @id @default(uuid())
+  amount          Decimal         @db.Decimal(10, 2)
+  currency        String          @default("NPR")
+  provider        PaymentProvider
+  status          PaymentStatus   @default(PENDING)
+  transactionId   String?         @unique
+  metadata        Json?
+  
+  registrationId  String          @unique
+  registration    Registration    @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  
+  userId          String
+  user            User            @relation(fields: [userId], references: [id])
+  
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@map("payments")
+}
+
+model Session {
+  id            String    @id @default(uuid())
+  title         String
+  description   String?
+  speaker       String?
+  speakerBio    String?
+  speakerAvatar String?
+  room          String?
+  startTime     DateTime
+  endTime       DateTime
+  
+  eventId       String
+  event         Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([eventId])
+  @@map("sessions")
+}
+
+model CheckIn {
+  id              String        @id @default(uuid())
+  method          CheckInMethod @default(QR_SCAN)
+  checkedInAt     DateTime      @default(now())
+  checkedInBy     String?
+  notes           String?
+  
+  registrationId  String        @unique
+  registration    Registration  @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  
+  userId          String
+  user            User          @relation(fields: [userId], references: [id])
+
+  @@index([registrationId])
+  @@map("check_ins")
+}
+
+model PromoCode {
+  id            String    @id @default(uuid())
+  code          String
+  discountType  String    @default("PERCENTAGE") // PERCENTAGE or FIXED
+  discountValue Decimal   @db.Decimal(10, 2)
+  maxUses       Int       @default(100)
+  usedCount     Int       @default(0)
+  validFrom     DateTime  @default(now())
+  validUntil    DateTime
+  isActive      Boolean   @default(true)
+  
+  eventId       String
+  event         Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  
+  registrations Registration[]
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([code, eventId])
+  @@index([eventId])
+  @@map("promo_codes")
+}
+
+model Poll {
+  id            String      @id @default(uuid())
+  question      String
+  options       Json        // Array of {id, text}
+  isActive      Boolean     @default(true)
+  endsAt        DateTime?
+  
+  eventId       String
+  event         Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  
+  votes         PollVote[]
+  
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([eventId])
+  @@map("polls")
+}
+
+model PollVote {
+  id        String   @id @default(uuid())
+  optionId  String
+  
+  pollId    String
+  poll      Poll     @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  
+  createdAt DateTime @default(now())
+
+  @@unique([pollId, userId])
+  @@map("poll_votes")
+}
+
+model Notification {
+  id        String            @id @default(uuid())
+  title     String
+  body      String
+  type      NotificationType
+  read      Boolean           @default(false)
+  data      Json?
+  
+  userId    String
+  user      User              @relation(fields: [userId], references: [id])
+  
+  createdAt DateTime          @default(now())
+
+  @@index([userId])
+  @@index([read])
+  @@map("notifications")
+}
+
+model Announcement {
+  id        String   @id @default(uuid())
+  title     String
+  content   String
+  priority  String   @default("NORMAL") // LOW, NORMAL, HIGH, URGENT
+  
+  eventId   String
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([eventId])
+  @@map("announcements")
+}
